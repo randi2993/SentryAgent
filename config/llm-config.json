@@ -1,0 +1,53 @@
+{
+    "default": "gemini-flash",
+    "fallbackModel": "gemini-flash",
+    "fallbackBehavior": "ask",
+    "providers": {
+        "gemini-flash": {
+            "provider": "gemini",
+            "model": "gemini-2.0-flash",
+            "temperature": 0.1,
+            "maxOutputTokens": 2048
+        },
+        "gemini-pro": {
+            "provider": "gemini",
+            "model": "gemini-2.0-pro",
+            "temperature": 0.3,
+            "maxOutputTokens": 4096
+        },
+        "claude-sonnet": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-5",
+            "temperature": 0.1,
+            "maxOutputTokens": 4096
+        },
+        "qwen3": {
+            "provider": "ollama",
+            "model": "qwen3:7b",
+            "endpoint": "http://localhost:11434",
+            "temperature": 0.1,
+            "maxOutputTokens": 2048
+        },
+        "deepseek-r1": {
+            "provider": "ollama",
+            "model": "deepseek-r1:8b",
+            "endpoint": "http://localhost:11434",
+            "temperature": 0.1,
+            "maxOutputTokens": 2048
+        },
+        "qwen-coder": {
+            "provider": "ollama",
+            "model": "qwen2.5-coder:7b",
+            "endpoint": "http://localhost:11434",
+            "temperature": 0.1,
+            "maxOutputTokens": 2048
+        },
+        "llama": {
+            "provider": "ollama",
+            "model": "llama3.1:8b",
+            "endpoint": "http://localhost:11434",
+            "temperature": 0.1,
+            "maxOutputTokens": 2048
+        }
+    }
+}

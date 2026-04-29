@@ -1,0 +1,39 @@
+# --- SEGURIDAD CRÍTICA (No subir nunca) ---
+# Contiene tu GEMINI_API_KEY, TELEGRAM_TOKEN y ALLOWED_CHAT_ID [cite: 1124, 1150]
+.env
+.env.local
+.env.*.local
+
+# --- DEPENDENCIAS ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- COMPILACIÓN (TypeScript) ---
+dist/
+build/
+*.tsbuildinfo
+
+# --- MEMORIA Y SESIONES (Privacidad) ---
+# Evita que las conversaciones personales de Telegram se suban a un repo [cite: 1110, 1171]
+src/memory/sessions/*.json
+.agent/memory/sessions/*.json
+
+# --- CONTEXTO DE AGENTE (Evitar bucles de tokens) ---
+# Si usas logs pesados o archivos temporales, bloquéalos para que 
+# Gemini no los lea como contexto base [cite: 1151, 1293]
+*.log
+temp/
+tmp/
+
+# --- CONFIGURACIONES DE IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Chat configs contienen IDs de grupos privados
+config/chats/*.json
