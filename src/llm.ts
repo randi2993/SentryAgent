@@ -1,15 +1,28 @@
+export interface ProviderDefaults {
+    baseUrl: string;
+    temperature: number;
+    maxOutputTokens: number;
+}
+
 export interface ModelProviderConfig {
     provider: 'gemini' | 'anthropic' | 'ollama';
     model: string;
+    baseUrl?: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+}
+
+export interface ResolvedModelConfig extends ModelProviderConfig {
+    baseUrl: string;
     temperature: number;
     maxOutputTokens: number;
-    endpoint?: string;
 }
 
 export interface LLMConfig {
     default: string;
     fallbackModel: string;
     fallbackBehavior: 'ask' | 'fail';
+    providerDefaults: Record<string, ProviderDefaults>;
     providers: Record<string, ModelProviderConfig>;
 }
 
@@ -42,6 +55,16 @@ interface OllamaResponse {
     message?: { content?: string };
 }
 
+function resolveModelConfig(modelConfig: ModelProviderConfig, defaults: ProviderDefaults): ResolvedModelConfig {
+    return {
+        provider: modelConfig.provider,
+        model: modelConfig.model,
+        baseUrl: modelConfig.baseUrl || defaults.baseUrl,
+        temperature: modelConfig.temperature !== undefined ? modelConfig.temperature : defaults.temperature,
+        maxOutputTokens: modelConfig.maxOutputTokens !== undefined ? modelConfig.maxOutputTokens : defaults.maxOutputTokens
+    };
+}
+
 /**
  * Generates content using the configured LLM provider (Gemini, Anthropic, or Ollama).
  * Exposes a single unified interface that handles API key loading, payload formatting,
@@ -50,15 +73,22 @@ interface OllamaResponse {
 export async function generateContent(prompt: string, context: LLMContext, modelKey?: string): Promise<LLMResult> {
     const { config } = context;
     const activeKey = modelKey || config.default;
-    let providerConfig = config.providers[activeKey];
+    let modelConfig = config.providers[activeKey];
 
-    if (!providerConfig) {
+    if (!modelConfig) {
         console.error(`Model key '${activeKey}' not found in config. Using default.`);
-        providerConfig = config.providers[config.default];
-        if (!providerConfig) {
+        modelConfig = config.providers[config.default];
+        if (!modelConfig) {
             throw new Error(`Default model '${config.default}' not found in config.`);
         }
     }
+
+    const providerDefaults = config.providerDefaults[modelConfig.provider];
+    if (!providerDefaults) {
+        throw new Error(`No defaults found for provider '${modelConfig.provider}'`);
+    }
+
+    const providerConfig = resolveModelConfig(modelConfig, providerDefaults);
 
     // Inject ACTIVE_MODEL into system prompt to prevent the model from misidentifying itself
     const baseSystemPrompt = context.systemPrompt || '';
@@ -87,11 +117,11 @@ export async function generateContent(prompt: string, context: LLMContext, model
     }
 }
 
-async function callGemini(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ModelProviderConfig): Promise<LLMResult> {
+async function callGemini(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ResolvedModelConfig): Promise<LLMResult> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${providerConfig.model}:generateContent?key=${apiKey}`;
+    const url = `${providerConfig.baseUrl}/models/${providerConfig.model}:generateContent?key=${apiKey}`;
 
     const contents = [];
     if (history) {
@@ -126,11 +156,11 @@ async function callGemini(prompt: string, systemPrompt: string, history: Message
     return { text };
 }
 
-async function callAnthropic(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ModelProviderConfig): Promise<LLMResult> {
+async function callAnthropic(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ResolvedModelConfig): Promise<LLMResult> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
 
-    const url = 'https://api.anthropic.com/v1/messages';
+    const url = `${providerConfig.baseUrl}/messages`;
 
     const messages = [];
     if (history) {
@@ -168,9 +198,8 @@ async function callAnthropic(prompt: string, systemPrompt: string, history: Mess
     return { text };
 }
 
-async function callOllama(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ModelProviderConfig): Promise<LLMResult> {
-    const endpoint = providerConfig.endpoint || 'http://localhost:11434';
-    const url = `${endpoint}/api/chat`;
+async function callOllama(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ResolvedModelConfig): Promise<LLMResult> {
+    const url = `${providerConfig.baseUrl}/api/chat`;
 
     const messages = [];
     if (systemPrompt) {

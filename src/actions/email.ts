@@ -1,12 +1,3 @@
-/**
- * Note: Implementing SMTP and IMAP from scratch using native Node.js TCP sockets is highly complex.
- * The standard approach is to use `nodemailer` for SMTP and `imapflow` (or similar) for IMAP.
- * However, the project rules forbid installing new npm packages without owner permission.
- * 
- * Please provide permission to install `nodemailer` and an IMAP package, 
- * or provide the REST API endpoint if you use an external provider (like Resend).
- */
-
 export async function sendEmail(to: string, subject: string, body: string): Promise<void> {
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT;

@@ -52,21 +52,19 @@ export async function startBot(llmConfig: LLMConfig) {
 
   const bot = new Telegraf(token);
 
-  // Middleware: Whitelist enforcement
   bot.use(async (ctx, next) => {
     const userId = ctx.from?.id.toString();
     if (userId && allowedChatIds.includes(userId)) {
       return next();
     }
-    // Silently ignore unauthorized updates
   });
 
   // Load static context loaded at runtime
   let agentContext = '';
   try {
     agentContext = await readFile(join(process.cwd(), '.agent', 'agent.md'), 'utf-8');
-  } catch {
-    console.error('Warning: .agent/agent.md not found or unreadable.');
+  } catch (error) {
+    console.error('.agent/agent.md not found or unreadable:', error);
   }
 
   // Core message processing logic (used for both normal text and fallback retries)
@@ -101,59 +99,58 @@ export async function startBot(llmConfig: LLMConfig) {
     };
 
     if ('sendChatAction' in ctx) {
-      await ctx.sendChatAction('typing').catch(() => {});
+      await ctx.sendChatAction('typing').catch(() => { });
     }
 
     try {
       const result = await handleUserMessage(text, context, activeModel);
 
-      // Only push user message if it's the original call, not a fallback call (avoid duplicate history)
-      if (!fallbackModel) {
-        history.push({ role: 'user', content: text });
-      }
+    // Only push user message if it's the original call, not a fallback call (avoid duplicate history)
+    if (!fallbackModel) {
+      history.push({ role: 'user', content: text });
+    }
 
-      if (result.type === 'fallback_required') {
-        const actionId = `${chatId}_${Date.now()}_fallback`;
-        // Store the prompt temporarily so the fallback callback can use it
-        pendingActions.set(actionId, { action: 'USE_FALLBACK', args: { prompt: text } });
-        
-        await ctx.reply(`⚠️ Model **${activeModel}** is currently unavailable.\nWould you like to try again using the fallback model (**${llmConfig.fallbackModel}**)?`, {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '✅ Yes, use fallback', callback_data: `fallback:confirm:${actionId}` },
-              { text: '❌ No', callback_data: `fallback:cancel:${actionId}` }
-            ]]
-          }
-        });
-        return;
-      }
+    if (result.type === 'fallback_required') {
+      const actionId = `${chatId}_${Date.now()}_fallback`;
+      pendingActions.set(actionId, { action: 'USE_FALLBACK', args: { prompt: text } });
 
-      if (result.type === 'action_pending' && result.pendingAction) {
-        const actionId = `${chatId}_${Date.now()}`;
-        pendingActions.set(actionId, result.pendingAction);
+      await ctx.reply(`⚠️ Model **${activeModel}** is currently unavailable.\nWould you like to try again using the fallback model (**${llmConfig.fallbackModel}**)?`, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Yes, use fallback', callback_data: `fallback:confirm:${actionId}` },
+            { text: '❌ No', callback_data: `fallback:cancel:${actionId}` }
+          ]]
+        }
+      });
+      return;
+    }
 
-        const actionText = `⚠️ Destructive action requested: **${result.pendingAction.action}**\n\nArguments:\n\`\`\`json\n${JSON.stringify(result.pendingAction.args, null, 2)}\n\`\`\`\n\nDo you want to proceed?`;
-        
-        await ctx.reply(actionText, {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '✅ Confirm', callback_data: `action:confirm:${actionId}` },
-              { text: '❌ Cancel', callback_data: `action:cancel:${actionId}` }
-            ]]
-          }
-        });
-      }
+    if (result.type === 'action_pending' && result.pendingAction) {
+      const actionId = `${chatId}_${Date.now()}`;
+      pendingActions.set(actionId, result.pendingAction);
 
-      if (result.type === 'action_executed') {
-        await ctx.reply(`${result.text}\n\`\`\`\n${result.actionResult}\n\`\`\``, { parse_mode: 'Markdown' });
-      }
+      const actionText = `⚠️ Destructive action requested: **${result.pendingAction.action}**\n\nArguments:\n\`\`\`json\n${JSON.stringify(result.pendingAction.args, null, 2)}\n\`\`\`\n\nDo you want to proceed?`;
 
-      if (result.type === 'text' && result.text) {
-        history.push({ role: 'model', content: result.text });
-        await ctx.reply(result.text);
-      }
+      await ctx.reply(actionText, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '✅ Confirm', callback_data: `action:confirm:${actionId}` },
+            { text: '❌ Cancel', callback_data: `action:cancel:${actionId}` }
+          ]]
+        }
+      });
+    }
+
+    if (result.type === 'action_executed') {
+      await ctx.reply(`${result.text}\n\`\`\`\n${result.actionResult}\n\`\`\``, { parse_mode: 'Markdown' });
+    }
+
+    if (result.type === 'text' && result.text) {
+      history.push({ role: 'model', content: result.text });
+      await ctx.reply(result.text);
+    }
 
     } catch (error) {
       console.error('Error handling user message:', error);
@@ -170,7 +167,7 @@ export async function startBot(llmConfig: LLMConfig) {
 
   bot.command('status', async (ctx) => {
     const chatId = ctx.chat.id.toString();
-    const threadId = ctx.message && 'message_thread_id' in ctx.message 
+    const threadId = ctx.message && 'message_thread_id' in ctx.message
       ? ctx.message.message_thread_id?.toString() || 'root'
       : 'root';
     const chatConf = await getChatConfig(chatId, llmConfig);
@@ -186,7 +183,7 @@ export async function startBot(llmConfig: LLMConfig) {
   bot.command('model', async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
     const chatId = ctx.chat.id.toString();
-    const threadId = ctx.message && 'message_thread_id' in ctx.message 
+    const threadId = ctx.message && 'message_thread_id' in ctx.message
       ? ctx.message.message_thread_id?.toString() || 'root'
       : 'root';
     const chatConf = await getChatConfig(chatId, llmConfig);
@@ -228,7 +225,7 @@ export async function startBot(llmConfig: LLMConfig) {
     const data = ctx.callbackQuery.data;
 
     const parts = data.split(':');
-    
+
     // Handle destructive action confirmation
     if (parts[0] === 'action') {
       const decision = parts[1];
@@ -250,7 +247,7 @@ export async function startBot(llmConfig: LLMConfig) {
       if (decision === 'confirm') {
         pendingActions.delete(actionId);
         await ctx.editMessageText(`✅ Executing ${action.action}...`);
-        
+
         try {
           const result = await executeAction(action.action, action.args);
           const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
@@ -260,12 +257,12 @@ export async function startBot(llmConfig: LLMConfig) {
         }
         await ctx.answerCbQuery();
       }
-    } 
+    }
     // Handle fallback model confirmation
     else if (parts[0] === 'fallback') {
       const decision = parts[1];
       const actionId = parts[2];
-      
+
       const action = pendingActions.get(actionId);
       if (!action) {
         await ctx.answerCbQuery('Fallback request expired.');
@@ -282,13 +279,13 @@ export async function startBot(llmConfig: LLMConfig) {
       if (decision === 'confirm') {
         pendingActions.delete(actionId);
         await ctx.editMessageText(`✅ Retrying with fallback model: ${llmConfig.fallbackModel}`);
-        
+
         const prompt = String(action.args?.prompt || '');
         const msg = ctx.callbackQuery.message;
         const threadId = msg && 'message_thread_id' in msg && msg.message_thread_id
           ? msg.message_thread_id.toString()
           : 'root';
-        
+
         // Retry logic processing
         await processUserMessage(ctx, prompt, threadId, llmConfig.fallbackModel);
         await ctx.answerCbQuery();
@@ -302,7 +299,7 @@ export async function startBot(llmConfig: LLMConfig) {
     if (text.startsWith('/')) return; // Ignore unhandled commands
 
     const threadIdStr = 'message_thread_id' in ctx.message && ctx.message.message_thread_id
-      ? ctx.message.message_thread_id.toString() 
+      ? ctx.message.message_thread_id.toString()
       : 'root';
 
     await processUserMessage(ctx, text, threadIdStr);

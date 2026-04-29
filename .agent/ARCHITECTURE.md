@@ -9,10 +9,16 @@ This file is for developers and AI assistants only — it is NOT loaded by the b
 
 - Static file. Edited manually by the owner only. Never modified by the bot at runtime.
 - Source of truth for available models and their parameters.
-- Fields: `default` (model key), `fallbackModel` (model key), `fallbackBehavior` ("ask" | "fail"), `providers` (map of model configs).
-- Each provider entry has: `provider` ("gemini" | "anthropic" | "ollama"), `model`, `temperature`, `maxOutputTokens`.
-- Ollama entries also have `endpoint` (default: `http://localhost:11434`).
+- Fields: `default` (model key), `fallbackModel` (model key), `fallbackBehavior` ("ask" | "fail"), `providerDefaults` (defaults per provider), `providers` (map of model configs).
+- `providerDefaults` maps each provider ("gemini" | "anthropic" | "ollama") to shared defaults: `baseUrl`, `temperature`, `maxOutputTokens`.
+- Each provider entry in `providers` specifies only `provider` and `model`, optionally overriding inherited defaults.
+- At runtime, `llm.ts` merges each model's entry with its provider's defaults (model entry wins on conflict).
 - API keys are NOT stored here. They come from `process.env`.
+
+## config/mcp-config.json
+
+- For Antigravity IDE only. Not loaded or used at runtime by the bot.
+- Empty by default.
 
 ## config/chats/{chat_id}.json
 
@@ -49,6 +55,7 @@ This file is for developers and AI assistants only — it is NOT loaded by the b
 ## src/llm.ts
 
 - Reads model config from `config/llm-config.json` (loaded at startup, passed in — not re-read per request).
+- Merges each model's config with its provider's defaults from `providerDefaults` at runtime (model entry wins on conflict).
 - Reads API keys from `process.env`: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`.
 - Exposes a single `generateContent(prompt, context, modelKey?)` function.
 - Internally routes to the correct client based on `provider` field:
@@ -128,3 +135,25 @@ This file is for developers and AI assistants only — it is NOT loaded by the b
 - `execCommand` is always destructive — executor must confirm before calling.
 - `unlockLaptop` is destructive.
 - Commands in `execCommand` come from the LLM response parsed by executor — never directly from raw user input.
+
+---
+
+## Notes on intentional design decisions
+
+### executor.ts — SYSTEM_PROMPT_INJECTION stays in code
+
+The action schema injected into the LLM system prompt is defined in `executor.ts`, not in `.agent/agent.md`. This is intentional: the schema is tightly coupled to the functions in `actions/*.ts`. If a new action is added, the schema must be updated in the same file. Moving it to a `.md` would create two sources of truth that can drift apart.
+
+### llm.ts — API URLs come from config, not hardcoded
+
+API base URLs (`baseUrl`) must be read from the provider config in `llm-config.json`. The URL is constructed at runtime:
+
+- Gemini: `${baseUrl}/models/${model}:generateContent?key=${apiKey}`
+- Anthropic: `${baseUrl}/messages`
+- Ollama: `${baseUrl}/api/chat`
+
+### telegram.ts — Whitelist middleware
+
+- Single middleware only — do not duplicate.
+- Silently ignores unauthorized updates — no logging, no response.
+- Checks `ctx.from?.id` against `ALLOWED_CHAT_ID` (comma-separated in `.env` for multiple users).

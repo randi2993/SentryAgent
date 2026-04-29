@@ -16,12 +16,5 @@ export async function execCommand(cmd: string): Promise<string> {
 }
 
 export async function unlockLaptop(): Promise<string> {
-  try {
-    // Unlocking a Windows session programmatically from a background service requires a specific setup.
-    // A common workaround is to use `tscon` to hijack the console session or use a third-party tool like NirCmd.
-    // Since environments vary wildly, this throws until configured with the exact local command.
-    throw new Error('Unlock laptop command requires a specific script or tool path defined for this environment.');
-  } catch (error) {
-    throw new Error(`Failed to unlock laptop: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  throw new Error('Unlock laptop command requires a specific script or tool path defined for this environment.');
 }

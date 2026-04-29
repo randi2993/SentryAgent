@@ -99,3 +99,44 @@ This is enforced in code (`executor.ts`), not just in the system prompt.
 - Do not abstract prematurely — keep files simple until there is a real reason
 - When fixing something, explain the change and verify it does not break existing functionality
 - When modifying `.agent/*.md` files, do not invent facts — ask if unsure
+
+## Configuration inheritance via providerDefaults
+
+- `llm-config.json` has a top-level `providerDefaults` section mapping each provider to shared defaults (`baseUrl`, `temperature`, `maxOutputTokens`).
+- Model entries in `providers` only specify `provider` and `model`, optionally overriding inherited values.
+- At runtime, `llm.ts` merges `providerDefaults[provider]` with the model entry. Model entry wins on conflict.
+- Example:
+  ```json
+  "providerDefaults": {
+    "gemini": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "temperature": 0.1,
+      "maxOutputTokens": 2048
+    }
+  },
+  "providers": {
+    "gemini-flash": {
+      "provider": "gemini",
+      "model": "gemini-2.0-flash"
+    },
+    "gemini-pro": {
+      "provider": "gemini",
+      "model": "gemini-2.0-pro",
+      "maxOutputTokens": 4096
+    }
+  }
+  ```
+  - `gemini-flash` inherits all defaults: baseUrl, temperature 0.1, maxOutputTokens 2048
+  - `gemini-pro` inherits baseUrl and temperature, but overrides maxOutputTokens to 4096
+
+## Logging rules
+
+- Use `console.error` for all logging — no `console.log`, no logging libraries.
+- Never log sensitive values: API keys, tokens, whitelist IDs, chat IDs.
+- Whitelist enforcement must fail silently — do not log unauthorized attempts.
+
+## Comments in code
+
+- Do not add explanatory comments about why something is not implemented yet.
+- Do not add comments describing what a function does if the name is self-explanatory.
+- Only add a comment when the WHY is non-obvious to another developer.
