@@ -1,4 +1,4 @@
-# ARCHITECTURE
+﻿# ARCHITECTURE
 
 Source file responsibilities. Read this when generating or modifying any file in `src/` or `config/`.
 This file is for developers and AI assistants only — it is NOT loaded by the bot at runtime.
@@ -102,6 +102,8 @@ This file is for developers and AI assistants only — it is NOT loaded by the b
   - Messages added via `history.push({ role: 'user'|'model', content: string })`
   - Token footer NOT saved to history—only appended to Telegram message
   - On fallback retry, original message is NOT re-added to history (avoid duplicates)
+  - `action_executed` results push `"Executed action: {name} with result: {result}"` to history
+  - `action_pending` results push `"Requested destructive action: {name}, awaiting user confirmation"` to history
   - History purged per-thread (if a thread ID is reused after months, history resets)
 - **Pending actions** (`pendingActions` Map):
   - Stores destructive actions awaiting HITL confirmation
@@ -124,13 +126,16 @@ This file is for developers and AI assistants only — it is NOT loaded by the b
 - Receives user message + modelKey from `telegram.ts`.
 - Calls `llm.ts` to get the LLM response.
 - **Action parsing**: Extracts JSON action schemas from LLM response. Looks for JSON in markdown code blocks (````json...````) first; if not found, attempts to parse the entire response as JSON. If parsing fails or no `action` field is present, treats the response as normal text.
-- Classifies each action as `safe` or `destructive`:
-  - Destructive: delete, overwrite, restart service, run arbitrary command, send email, unlock
-  - Safe: read file, list directory, check service status
-- Safe actions → execute immediately via `actions/*.ts`, return result.
-- Destructive actions → do NOT execute. Return pending state to `telegram.ts`.
-  `telegram.ts` sends inline keyboard (✅ Confirm / ❌ Cancel) to owner.
-  Only executes after owner taps Confirm.
+- **Action classification** via `classifyAction(actionName)` returns `'readOnly' | 'safe' | 'destructive'`:
+  - `readOnly`: `getHostname`, `getUsername`, `getEnvVar`, `getOSInfo`, `getSpecialFolder` — system info queries that make no changes
+  - `safe`: `readFile`, `listDirectory`, `getServiceStatus`, `readEmails` — read-only operations that return data
+  - `destructive`: `writeFile`, `deleteFile`, `restartIIS`, `restartNodeRed`, `sendEmail`, `execCommand`, `unlockLaptop`
+- Execution model:
+  - `destructive` actions → do NOT execute. Return pending state to `telegram.ts`.
+    `telegram.ts` sends inline keyboard (✅ Confirm / ❌ Cancel) to owner.
+    Only executes after owner taps Confirm.
+  - `readOnly` and `safe` actions → execute immediately and loop: result is fed back to the LLM as the next prompt (via `workingHistory`), allowing the LLM to chain multiple actions (e.g. getUsername → writeFile) within a single user turn. Max 5 iterations.
+- **SYSTEM_PROMPT_INJECTION** includes seven explicit rules: prefer `getHostname`/`getUsername` for identity queries; use `getSpecialFolder` for Desktop/Documents/Pictures paths instead of constructing manually; resolve other user paths dynamically via `getUsername`; never hardcode usernames or paths; use `execCommand` only as a last resort; respond with plain text when no action is needed.
 - **Token usage visibility**: Token usage is only returned in the executor result for text responses (type: 'text'). Action execution results (type: 'action_pending' or 'action_executed') do not include token usage, as the usage metrics belong to the decision-making LLM call, not the subsequent action execution.
 - Never calls Telegram API directly — returns results to `telegram.ts`.
 
@@ -159,11 +164,24 @@ This file is for developers and AI assistants only — it is NOT loaded by the b
 
 ## src/actions/system.ts
 
-- Pure async functions. No LLM calls, no Telegram calls.
-- Exports: `unlockLaptop()`, `execCommand(cmd)`.
-- `execCommand` is always destructive — executor must confirm before calling.
-- `unlockLaptop` is destructive.
+- Pure synchronous and async functions. No LLM calls, no Telegram calls.
+- Exports: `execCommand(cmd)`, `unlockLaptop()`, `getHostname()`, `getUsername()`, `getEnvVar(name)`, `getOSInfo()`.
+- **Destructive actions** (require HITL confirmation):
+  - `execCommand(cmd)` — executes arbitrary shell commands; classified destructive
+  - `unlockLaptop()` — locked device unlock; classified destructive
+- **ReadOnly actions** (execute immediately, no confirmation):
+  - `getHostname()` — returns system hostname
+  - `getUsername()` — returns current user
+  - `getEnvVar(name)` — returns environment variable value or `'<not set>'`
+  - `getOSInfo()` — returns `{ type, release, arch, platform }` (OS type, version, architecture, platform name)
+  - `getSpecialFolder(folder)` — returns the real filesystem path for a named special folder. Valid names: `Desktop`, `MyDocuments`, `MyPictures`, `MyMusic`, `Startup`. On Windows uses PowerShell `[Environment]::GetFolderPath`. On Linux/Mac uses `xdg-user-dir` with a fallback to `\C:\Users\randi/{name}`. `Startup` is Windows-only.
 - Commands in `execCommand` come from the LLM response parsed by executor — never directly from raw user input.
+
+---
+
+## Development workflow
+
+Follow the mandatory two-step workflow defined in SHARED.md before and after any change.
 
 ---
 

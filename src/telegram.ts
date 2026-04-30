@@ -154,11 +154,13 @@ export async function startBot(llmConfig: LLMConfig) {
             ]]
           }
         });
+        history.push({ role: 'model', content: `Requested destructive action: ${result.pendingAction.action}, awaiting user confirmation` });
         return;
       }
 
       if (result.type === 'action_executed') {
         await ctx.reply(`${result.text}\n\`\`\`\n${result.actionResult}\n\`\`\``, { parse_mode: 'Markdown' });
+        history.push({ role: 'model', content: `${result.text} with result: ${result.actionResult}` });
         return;
       }
 

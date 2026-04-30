@@ -19,80 +19,90 @@ export interface ExecutorResult {
 
 const SYSTEM_PROMPT_INJECTION = `
 You are an AI assistant capable of executing local system commands.
-To execute an action, you MUST output ONLY a valid JSON object matching this schema. Do not output markdown or explanatory text before or after the JSON.
+To execute an action, output ONLY a valid JSON object. No markdown, no explanation.
 
 {
   "action": "action_name",
-  "args": {
-    "param1": "value"
-  }
+  "args": { "param1": "value" }
 }
 
 Available actions:
-- readFile (args: { path: string })
-- listDirectory (args: { path: string })
-- getServiceStatus (args: { name: string })
-- readEmails (args: { folder: string, limit: number })
-- writeFile (args: { path: string, content: string })
-- deleteFile (args: { path: string })
-- restartIIS (args: {})
-- restartNodeRed (args: {})
-- sendEmail (args: { to: string, subject: string, body: string })
-- execCommand (args: { cmd: string })
-- unlockLaptop (args: {})
+- readFile (args: { path: string }) — read file content
+- listDirectory (args: { path: string }) — list directory contents
+- writeFile (args: { path: string, content: string }) — create or overwrite a file
+- deleteFile (args: { path: string }) — delete a file
+- getServiceStatus (args: { name: string }) — check if a service is running
+- restartIIS (args: {}) — restart IIS web server
+- restartNodeRed (args: {}) — restart Node-RED service
+- sendEmail (args: { to: string, subject: string, body: string }) — send email
+- readEmails (args: { folder: string, limit: number }) — read emails
+- execCommand (args: { cmd: string }) — run arbitrary shell command (last resort only)
+- unlockLaptop (args: {}) — unlock the laptop screen
+- getHostname (args: {}) — returns the machine name (e.g. "Gilgamesh")
+- getUsername (args: {}) — returns the OS username (e.g. "randi")
+- getEnvVar (args: { name: string }) — returns an environment variable value
+- getOSInfo (args: {}) — returns OS type, version, architecture
+- getSpecialFolder (args: { folder: string }) — returns the real path of a special folder (Desktop, MyDocuments, MyPictures, MyMusic, Startup)
 
-If you DO NOT want to perform an action, just answer normally with plain text. Do not use JSON.
+Rules:
+1. When the user asks for the machine name or computer name → use getHostname
+2. When the user asks for the username or current user → use getUsername
+3. When resolving file paths that include the user folder or desktop, use getSpecialFolder. Only fall back to getUsername if the path is not a recognized special folder.
+4. Never hardcode usernames or paths. Always resolve them dynamically.
+5. Only use execCommand when no other action fits the task.
+6. If no action is needed, respond with plain text only — no JSON.
+7. When resolving special folders (Desktop, Documents, Pictures), always use getSpecialFolder instead of constructing paths manually.
 `.trim();
 
 /**
  * Main entry point for processing a user message.
  */
 export async function handleUserMessage(prompt: string, llmContext: LLMContext, modelKey?: string): Promise<ExecutorResult> {
-  // Inject instructions so the LLM knows how to trigger actions via JSON
   const finalContext: LLMContext = {
     ...llmContext,
-    systemPrompt: llmContext.systemPrompt 
+    systemPrompt: llmContext.systemPrompt
       ? `${llmContext.systemPrompt}\n\n${SYSTEM_PROMPT_INJECTION}`
       : SYSTEM_PROMPT_INJECTION
   };
 
-  const llmRes = await generateContent(prompt, finalContext, modelKey);
+  const workingHistory = [...(finalContext.history || [])];
+  let currentPrompt = prompt;
+  const MAX_CHAIN = 5;
 
-  if (llmRes.needsFallbackConfirmation) {
-    return { type: 'fallback_required' };
+  for (let i = 0; i < MAX_CHAIN; i++) {
+    const llmRes = await generateContent(currentPrompt, { ...finalContext, history: workingHistory }, modelKey);
+
+    if (llmRes.needsFallbackConfirmation) {
+      return { type: 'fallback_required' };
+    }
+
+    const responseText = llmRes.text || '';
+    const actionRequest = parseLLMResponse(responseText);
+
+    if (!actionRequest) {
+      return { type: 'text', text: responseText, usage: llmRes.usage };
+    }
+
+    if (classifyAction(actionRequest.action) === 'destructive') {
+      return { type: 'action_pending', pendingAction: actionRequest };
+    }
+
+    try {
+      const result = await executeAction(actionRequest.action, actionRequest.args);
+      const resultStr = typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result);
+      workingHistory.push({ role: 'user', content: currentPrompt });
+      workingHistory.push({ role: 'model', content: responseText });
+      currentPrompt = `Action result for ${actionRequest.action}: ${resultStr}`;
+    } catch (error) {
+      return {
+        type: 'action_executed',
+        text: `Failed to execute action: ${actionRequest.action}`,
+        actionResult: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
-  const responseText = llmRes.text || '';
-  const actionRequest = parseLLMResponse(responseText);
-
-  if (!actionRequest) {
-    // Normal conversation response
-    return { type: 'text', text: responseText, usage: llmRes.usage };
-  }
-
-  if (isActionDestructive(actionRequest.action)) {
-    // Destructive actions MUST NOT be executed automatically (HITL rule)
-    return {
-      type: 'action_pending',
-      pendingAction: actionRequest
-    };
-  }
-
-  // Safe actions are executed immediately
-  try {
-    const result = await executeAction(actionRequest.action, actionRequest.args);
-    return {
-      type: 'action_executed',
-      text: `Executed action: ${actionRequest.action}`,
-      actionResult: typeof result === 'object' ? JSON.stringify(result, null, 2) : String(result)
-    };
-  } catch (error) {
-    return {
-      type: 'action_executed',
-      text: `Failed to execute action: ${actionRequest.action}`,
-      actionResult: error instanceof Error ? error.message : String(error)
-    };
-  }
+  return { type: 'text', text: 'Maximum action chain length reached without a final response.' };
 }
 
 /**
@@ -134,9 +144,19 @@ export async function executeAction(actionName: string, args: Record<string, unk
       );
     case 'readEmails':
       return await email.readEmails(
-        requireString('folder', args.folder || 'INBOX'), 
+        requireString('folder', args.folder || 'INBOX'),
         args.limit ? requireNumber('limit', args.limit) : 10
       );
+    case 'getHostname':
+      return system.getHostname();
+    case 'getUsername':
+      return system.getUsername();
+    case 'getEnvVar':
+      return system.getEnvVar(requireString('name', args.name));
+    case 'getOSInfo':
+      return system.getOSInfo();
+    case 'getSpecialFolder':
+      return await system.getSpecialFolder(requireString('folder', args.folder));
     case 'execCommand':
       return await system.execCommand(requireString('cmd', args.cmd));
     case 'unlockLaptop':
@@ -146,12 +166,15 @@ export async function executeAction(actionName: string, args: Record<string, unk
   }
 }
 
-export function isActionDestructive(actionName: string): boolean {
+export function classifyAction(actionName: string): 'readOnly' | 'safe' | 'destructive' {
+  const readOnlyActions = ['getHostname', 'getUsername', 'getEnvVar', 'getOSInfo', 'getSpecialFolder'];
   const destructiveActions = [
     'writeFile', 'deleteFile', 'restartIIS', 'restartNodeRed',
     'sendEmail', 'execCommand', 'unlockLaptop'
   ];
-  return destructiveActions.includes(actionName);
+  if (readOnlyActions.includes(actionName)) return 'readOnly';
+  if (destructiveActions.includes(actionName)) return 'destructive';
+  return 'safe';
 }
 
 function parseLLMResponse(text: string): ActionRequest | null {

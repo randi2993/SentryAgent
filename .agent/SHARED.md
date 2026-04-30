@@ -1,5 +1,17 @@
 # SHARED — SentryAgent
 
+## !! MANDATORY WORKFLOW — READ BEFORE ACTING !!
+
+**Step 1 — Before touching any file (.ts, .json, .md, or any other):**
+Show the exact old block and the exact new block. No paraphrasing, no pseudocode. Wait for explicit approval before making any edit.
+
+**Step 2 — After every code change:**
+Identify which `.agent/*.md` files need updating. Show the exact old text and the exact new text for each. Wait for explicit approval before editing them.
+
+These steps are non-negotiable. A user saying "fix it" or "show the plan" does not satisfy Step 1 — the before/after diff must be shown and approved first.
+
+---
+
 Common rules and context for all AI assistants working in this repository.
 Read `ARCHITECTURE.md` for detailed responsibilities per file.
 
@@ -144,6 +156,3 @@ This is enforced in code (`executor.ts`), not just in the system prompt.
 - Do not add comments describing what a function does if the name is self-explanatory.
 - Only add a comment when the WHY is non-obvious to another developer.
 
-## Workflow rules
-
-Before making ANY change to any file (source code, config, or markdown), show exactly what will be changed and wait for explicit confirmation. Do not apply any modification without approval first. This applies to all file types: .ts, .json, .md, or any other.
