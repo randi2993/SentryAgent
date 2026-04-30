@@ -37,22 +37,33 @@ export interface LLMContext {
     history?: Message[];
 }
 
+export interface TokenUsage {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+}
+
 export interface LLMResult {
     text?: string;
     needsFallbackConfirmation?: boolean;
+    usage?: TokenUsage;
 }
 
 // Strict response typings to avoid 'any'
 interface GeminiResponse {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
 }
 
 interface AnthropicResponse {
     content?: Array<{ text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
 }
 
 interface OllamaResponse {
     message?: { content?: string };
+    prompt_eval_count?: number;
+    eval_count?: number;
 }
 
 function resolveModelConfig(modelConfig: ModelProviderConfig, defaults: ProviderDefaults): ResolvedModelConfig {
@@ -76,7 +87,7 @@ export async function generateContent(prompt: string, context: LLMContext, model
     let modelConfig = config.providers[activeKey];
 
     if (!modelConfig) {
-        console.error(`Model key '${activeKey}' not found in config. Using default.`);
+        console.log(`Model key '${activeKey}' not found in config. Using default.`);
         modelConfig = config.providers[config.default];
         if (!modelConfig) {
             throw new Error(`Default model '${config.default}' not found in config.`);
@@ -153,7 +164,16 @@ async function callGemini(prompt: string, systemPrompt: string, history: Message
 
     const data = (await res.json()) as GeminiResponse;
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return { text };
+
+    const usage = data.usageMetadata
+        ? {
+            promptTokens: data.usageMetadata.promptTokenCount || 0,
+            completionTokens: data.usageMetadata.candidatesTokenCount || 0,
+            totalTokens: (data.usageMetadata.promptTokenCount || 0) + (data.usageMetadata.candidatesTokenCount || 0)
+        }
+        : undefined;
+
+    return { text, usage };
 }
 
 async function callAnthropic(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ResolvedModelConfig): Promise<LLMResult> {
@@ -195,7 +215,16 @@ async function callAnthropic(prompt: string, systemPrompt: string, history: Mess
 
     const data = (await res.json()) as AnthropicResponse;
     const text = data.content?.[0]?.text || '';
-    return { text };
+
+    const usage = data.usage
+        ? {
+            promptTokens: data.usage.input_tokens || 0,
+            completionTokens: data.usage.output_tokens || 0,
+            totalTokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0)
+        }
+        : undefined;
+
+    return { text, usage };
 }
 
 async function callOllama(prompt: string, systemPrompt: string, history: Message[] | undefined, providerConfig: ResolvedModelConfig): Promise<LLMResult> {
@@ -235,5 +264,14 @@ async function callOllama(prompt: string, systemPrompt: string, history: Message
 
     const data = (await res.json()) as OllamaResponse;
     const text = data.message?.content || '';
-    return { text };
+
+    const usage = data.prompt_eval_count !== undefined || data.eval_count !== undefined
+        ? {
+            promptTokens: data.prompt_eval_count || 0,
+            completionTokens: data.eval_count || 0,
+            totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0)
+        }
+        : undefined;
+
+    return { text, usage };
 }

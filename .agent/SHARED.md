@@ -117,11 +117,11 @@ This is enforced in code (`executor.ts`), not just in the system prompt.
   "providers": {
     "gemini-flash": {
       "provider": "gemini",
-      "model": "gemini-2.0-flash"
+      "model": "gemini-2.5-flash"
     },
     "gemini-pro": {
       "provider": "gemini",
-      "model": "gemini-2.0-pro",
+      "model": "gemini-2.5-pro",
       "maxOutputTokens": 4096
     }
   }
@@ -131,12 +131,19 @@ This is enforced in code (`executor.ts`), not just in the system prompt.
 
 ## Logging rules
 
-- Use `console.error` for all logging — no `console.log`, no logging libraries.
+- Use `console.log` for informational messages: startup progress, successful operations, status checks, configuration loads, fallback activations.
+- Use `console.error` for actual errors only: exceptions, failures, API errors, bootstrap failures.
+- Command stderr (from child_process.exec) is not an error — log it as `console.log`.
 - Never log sensitive values: API keys, tokens, whitelist IDs, chat IDs.
-- Whitelist enforcement must fail silently — do not log unauthorized attempts.
+- Whitelist enforcement must fail silently — do not log any update details for unauthorized attempts.
+- No logging libraries — native console only.
 
 ## Comments in code
 
 - Do not add explanatory comments about why something is not implemented yet.
 - Do not add comments describing what a function does if the name is self-explanatory.
 - Only add a comment when the WHY is non-obvious to another developer.
+
+## Workflow rules
+
+Before making ANY change to any file (source code, config, or markdown), show exactly what will be changed and wait for explicit confirmation. Do not apply any modification without approval first. This applies to all file types: .ts, .json, .md, or any other.

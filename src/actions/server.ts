@@ -7,7 +7,7 @@ export async function restartIIS(): Promise<string> {
   try {
     const { stdout, stderr } = await execAsync('iisreset');
     if (stderr) {
-      console.error(`IIS Reset Warning/Error output: ${stderr}`);
+      console.log(`IIS Reset output: ${stderr}`);
     }
     return stdout.trim() || 'IIS restarted successfully.';
   } catch (error) {
@@ -21,7 +21,7 @@ export async function restartNodeRed(): Promise<string> {
     // Modify the service name if it differs in this specific environment
     const { stdout, stderr } = await execAsync('net stop "Node-RED" && net start "Node-RED"');
     if (stderr) {
-      console.error(`Node-RED Restart Warning/Error output: ${stderr}`);
+      console.log(`Node-RED Restart output: ${stderr}`);
     }
     return stdout.trim() || 'Node-RED restarted successfully.';
   } catch (error) {
@@ -33,7 +33,7 @@ export async function getServiceStatus(name: string): Promise<string> {
   try {
     const { stdout, stderr } = await execAsync(`sc query "${name}"`);
     if (stderr) {
-      console.error(`Service Query Warning/Error output: ${stderr}`);
+      console.log(`Service Query output: ${stderr}`);
     }
     return stdout.trim();
   } catch (error) {

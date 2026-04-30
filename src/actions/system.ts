@@ -7,7 +7,7 @@ export async function execCommand(cmd: string): Promise<string> {
   try {
     const { stdout, stderr } = await execAsync(cmd);
     if (stderr) {
-      console.error(`Command execution warning/error output: ${stderr}`);
+      console.log(`Command execution output: ${stderr}`);
     }
     return stdout.trim() || 'Command executed successfully with no output.';
   } catch (error) {

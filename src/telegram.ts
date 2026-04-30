@@ -21,6 +21,18 @@ const pendingActions = new Map<string, ActionRequest>();
 const conversationHistory = new Map<string, Message[]>();
 const CHATS_DIR = join(process.cwd(), 'config', 'chats');
 
+function formatTokenCount(count: number): string {
+  if (count < 1000) {
+    return String(count);
+  }
+  if (count < 1000000) {
+    const k = count / 1000;
+    return k % 1 === 0 ? `${k}k` : `${k.toFixed(1)}k`;
+  }
+  const m = count / 1000000;
+  return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+}
+
 async function getChatConfig(chatId: string, defaultConfig: LLMConfig): Promise<ChatConfig> {
   const filePath = join(CHATS_DIR, `${chatId}.json`);
   if (existsSync(filePath)) {
@@ -53,10 +65,11 @@ export async function startBot(llmConfig: LLMConfig) {
   const bot = new Telegraf(token);
 
   bot.use(async (ctx, next) => {
-    const userId = ctx.from?.id.toString();
-    if (userId && allowedChatIds.includes(userId)) {
+    const chatId = ctx.chat?.id.toString();
+    if (chatId && allowedChatIds.includes(chatId)) {
       return next();
     }
+    // Message from non-whitelisted chat is silently dropped for security
   });
 
   // Load static context loaded at runtime
@@ -64,7 +77,7 @@ export async function startBot(llmConfig: LLMConfig) {
   try {
     agentContext = await readFile(join(process.cwd(), '.agent', 'agent.md'), 'utf-8');
   } catch (error) {
-    console.error('.agent/agent.md not found or unreadable:', error);
+    console.log('.agent/agent.md not found or unreadable (optional), continuing without it');
   }
 
   // Core message processing logic (used for both normal text and fallback retries)
@@ -105,52 +118,63 @@ export async function startBot(llmConfig: LLMConfig) {
     try {
       const result = await handleUserMessage(text, context, activeModel);
 
-    // Only push user message if it's the original call, not a fallback call (avoid duplicate history)
-    if (!fallbackModel) {
-      history.push({ role: 'user', content: text });
-    }
+      // Only push user message if it's the original call, not a fallback call (avoid duplicate history)
+      if (!fallbackModel) {
+        history.push({ role: 'user', content: text });
+      }
 
-    if (result.type === 'fallback_required') {
-      const actionId = `${chatId}_${Date.now()}_fallback`;
-      pendingActions.set(actionId, { action: 'USE_FALLBACK', args: { prompt: text } });
+      if (result.type === 'fallback_required') {
+        const actionId = `${chatId}_${Date.now()}_fallback`;
+        pendingActions.set(actionId, { action: 'USE_FALLBACK', args: { prompt: text } });
 
-      await ctx.reply(`⚠️ Model **${activeModel}** is currently unavailable.\nWould you like to try again using the fallback model (**${llmConfig.fallbackModel}**)?`, {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Yes, use fallback', callback_data: `fallback:confirm:${actionId}` },
-            { text: '❌ No', callback_data: `fallback:cancel:${actionId}` }
-          ]]
+        await ctx.reply(`⚠️ Model **${activeModel}** is currently unavailable.\nWould you like to try again using the fallback model (**${llmConfig.fallbackModel}**)?`, {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '✅ Yes, use fallback', callback_data: `fallback:confirm:${actionId}` },
+              { text: '❌ No', callback_data: `fallback:cancel:${actionId}` }
+            ]]
+          }
+        });
+        return;
+      }
+
+      if (result.type === 'action_pending' && result.pendingAction) {
+        const actionId = `${chatId}_${Date.now()}`;
+        pendingActions.set(actionId, result.pendingAction);
+
+        const actionText = `⚠️ Destructive action requested: **${result.pendingAction.action}**\n\nArguments:\n\`\`\`json\n${JSON.stringify(result.pendingAction.args, null, 2)}\n\`\`\`\n\nDo you want to proceed?`;
+
+        await ctx.reply(actionText, {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '✅ Confirm', callback_data: `action:confirm:${actionId}` },
+              { text: '❌ Cancel', callback_data: `action:cancel:${actionId}` }
+            ]]
+          }
+        });
+        return;
+      }
+
+      if (result.type === 'action_executed') {
+        await ctx.reply(`${result.text}\n\`\`\`\n${result.actionResult}\n\`\`\``, { parse_mode: 'Markdown' });
+        return;
+      }
+
+      if (result.type === 'text' && result.text) {
+        history.push({ role: 'model', content: result.text });
+
+        let messageText = result.text;
+        if (result.usage) {
+          const inTokens = formatTokenCount(result.usage.promptTokens);
+          const outTokens = formatTokenCount(result.usage.completionTokens);
+          messageText += ` (↑${inTokens} ↓${outTokens} tk)`;
         }
-      });
-      return;
-    }
 
-    if (result.type === 'action_pending' && result.pendingAction) {
-      const actionId = `${chatId}_${Date.now()}`;
-      pendingActions.set(actionId, result.pendingAction);
-
-      const actionText = `⚠️ Destructive action requested: **${result.pendingAction.action}**\n\nArguments:\n\`\`\`json\n${JSON.stringify(result.pendingAction.args, null, 2)}\n\`\`\`\n\nDo you want to proceed?`;
-
-      await ctx.reply(actionText, {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '✅ Confirm', callback_data: `action:confirm:${actionId}` },
-            { text: '❌ Cancel', callback_data: `action:cancel:${actionId}` }
-          ]]
-        }
-      });
-    }
-
-    if (result.type === 'action_executed') {
-      await ctx.reply(`${result.text}\n\`\`\`\n${result.actionResult}\n\`\`\``, { parse_mode: 'Markdown' });
-    }
-
-    if (result.type === 'text' && result.text) {
-      history.push({ role: 'model', content: result.text });
-      await ctx.reply(result.text);
-    }
+        await ctx.reply(messageText);
+        return;
+      }
 
     } catch (error) {
       console.error('Error handling user message:', error);
@@ -167,8 +191,8 @@ export async function startBot(llmConfig: LLMConfig) {
 
   bot.command('status', async (ctx) => {
     const chatId = ctx.chat.id.toString();
-    const threadId = ctx.message && 'message_thread_id' in ctx.message
-      ? ctx.message.message_thread_id?.toString() || 'root'
+    const threadId = ctx.message && 'message_thread_id' in ctx.message && ctx.message.message_thread_id != null
+      ? ctx.message.message_thread_id.toString()
       : 'root';
     const chatConf = await getChatConfig(chatId, llmConfig);
     const activeModel = chatConf.threads[threadId]?.model || chatConf.defaultModel;
@@ -183,8 +207,8 @@ export async function startBot(llmConfig: LLMConfig) {
   bot.command('model', async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
     const chatId = ctx.chat.id.toString();
-    const threadId = ctx.message && 'message_thread_id' in ctx.message
-      ? ctx.message.message_thread_id?.toString() || 'root'
+    const threadId = ctx.message && 'message_thread_id' in ctx.message && ctx.message.message_thread_id != null
+      ? ctx.message.message_thread_id.toString()
       : 'root';
     const chatConf = await getChatConfig(chatId, llmConfig);
 
@@ -298,14 +322,26 @@ export async function startBot(llmConfig: LLMConfig) {
     const text = ctx.message.text;
     if (text.startsWith('/')) return; // Ignore unhandled commands
 
-    const threadIdStr = 'message_thread_id' in ctx.message && ctx.message.message_thread_id
+    const threadIdStr = 'message_thread_id' in ctx.message && ctx.message.message_thread_id != null
       ? ctx.message.message_thread_id.toString()
       : 'root';
 
     await processUserMessage(ctx, text, threadIdStr);
   });
 
-  bot.launch().then(() => console.log('Telegram bot started.'));
+  try {
+    console.log('Starting Telegram bot polling...');
+
+    bot.launch(() => {
+      console.log('✅ Bot is now listening for incoming messages');
+    });
+
+    console.log('✅ Bot launched, polling started');
+
+  } catch (error) {
+    console.error('❌ Failed to launch Telegram bot:', error);
+    throw error;
+  }
 
   // Graceful shutdown
   process.once('SIGINT', () => bot.stop('SIGINT'));

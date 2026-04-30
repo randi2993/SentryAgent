@@ -1,4 +1,4 @@
-import { generateContent, LLMContext } from './llm.js';
+import { generateContent, LLMContext, TokenUsage } from './llm.js';
 import * as files from './actions/files.js';
 import * as server from './actions/server.js';
 import * as email from './actions/email.js';
@@ -14,6 +14,7 @@ export interface ExecutorResult {
   text?: string;
   pendingAction?: ActionRequest;
   actionResult?: string;
+  usage?: TokenUsage;
 }
 
 const SYSTEM_PROMPT_INJECTION = `
@@ -66,7 +67,7 @@ export async function handleUserMessage(prompt: string, llmContext: LLMContext, 
 
   if (!actionRequest) {
     // Normal conversation response
-    return { type: 'text', text: responseText };
+    return { type: 'text', text: responseText, usage: llmRes.usage };
   }
 
   if (isActionDestructive(actionRequest.action)) {
