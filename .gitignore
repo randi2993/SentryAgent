@@ -37,3 +37,5 @@ Thumbs.db
 
 # Chat configs contienen IDs de grupos privados
 config/chats/*.json
+
+baseline.py

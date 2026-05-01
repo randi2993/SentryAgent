@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\('d:\\\\Dev\\\\GitProjects\\\\Github\\\\Typescript\\\\SentryAgent\\\\.agent\\\\ARCHITECTURE.md'\\); $lines = [System.Text.Encoding]::UTF8.GetString\\($bytes\\) -split \"`n\"; $lines[137])"
+      "PowerShell($bytes = [System.IO.File]::ReadAllBytes\\('d:\\\\Dev\\\\GitProjects\\\\Github\\\\Typescript\\\\SentryAgent\\\\.agent\\\\ARCHITECTURE.md'\\); $lines = [System.Text.Encoding]::UTF8.GetString\\($bytes\\) -split \"`n\"; $lines[137])",
+      "Bash(python -c \"import tiktoken; enc = tiktoken.get_encoding\\('cl100k_base'\\); files = ['.agent/SHARED.md', '.agent/ARCHITECTURE.md', '.agent/agent.md', '.agent/INDEX.md', '.agent/memory/learned.md']; [print\\(f'{f}: {len\\(enc.encode\\(open\\(f, encoding=\\\\\"utf-8\\\\\"\\).read\\(\\)\\)\\)}'\\) for f in files]\")",
+      "Bash(python -c ' *)"
     ]
   }
 }
